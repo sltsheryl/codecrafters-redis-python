@@ -1,21 +1,22 @@
 # Uncomment this to pass the first stage
-import socket
+import asyncio
 
-
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!")
-
-    # Uncomment this to pass the first stage
-    #
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    client, addr = server_socket.accept()
-
+# use eventloop
+async def handle_client(reader, writer):
     while True:
-        data = client.recv(1024)
+        data = await reader.read(1024)
         if not data:
             break
-        client.send("+PONG\r\n".encode())
+        writer.write("+PONG\r\n".encode())
+        await writer.drain()
+
+    writer.close()
+
+async def main():
+    server = await asyncio.start_server(handle_client, 'localhost', 6379)
+
+    async with server:
+        await server.serve_forever()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
