@@ -1,11 +1,13 @@
 import asyncio
 from app.parser import RedisParser
+from app.key_manager import KeyManager
 
 class RedisServer:
     def __init__(self, host = 'localhost', port = 6379):
         self.host = host
         self.port = port
-        self.parser = RedisParser()
+        self.key_manager = KeyManager()
+        self.parser = RedisParser(self.key_manager)
 
     # use eventloop
     async def handle_client(self, reader, writer):
