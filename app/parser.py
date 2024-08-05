@@ -23,7 +23,16 @@ class RedisParser:
                 return "-ERR invalid command\r\n"
             key = lines[4]
             value = lines[6]
-            return self.key_manager.set_key(key, value)
+            # px expiry is set
+            expiry = None
+            if len(lines) > 8 and lines[8].upper() == "PX":
+                if len(lines) < 11:
+                    return "-ERR invalid command\r\n"
+                try:
+                    expiry = int(lines[10])
+                except ValueError:
+                    return "-ERR invalid expiry\r\n"
+            return self.key_manager.set_key(key, value, expiry)
         elif commandWord == "GET":
             if len(lines) < 5:
                 return "-ERR invalid command\r\n"
