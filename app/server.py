@@ -83,6 +83,9 @@ class RedisServer:
                     writer.write("+OK\r\n".encode())
                     await writer.drain()
                     continue
+            elif command[0] == "*3" and command[2].upper() == "PSYNC":
+                # master cannot perform incremental replication with the replica, and will thus start a "full" resynchronization
+                writer.write(f"+FULLRESYNC {self.replication_id} 0\r\n".encode())
             else:    
                 response = self.parser.parse(data.decode())
                 writer.write(response.encode())
