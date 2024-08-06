@@ -25,12 +25,14 @@ class RedisServer:
         
     async def handshake_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
-        # ping 
+        # Step 1. Ping master 
         writer.write("*1\r\n$4\r\nPING\r\n".encode())
         await writer.drain()
         data = await reader.read(1024)
         if data.decode() != "+PONG\r\n":
             raise Exception("Failed to ping master")
+        
+        # Step 2. Send config of slave
         # REPLCONF listening-port <PORT>
         writer.write(f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode())
         await writer.drain()
@@ -43,6 +45,13 @@ class RedisServer:
         data = await reader.read(1024)
         if data.decode() != "+OK\r\n":
             raise Exception("Failed to send REPLCONF")
+        
+        # Step 3. Psync with master
+        # PSYNC <REPLID> <OFFSET>
+        writer.write(f"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode())
+        await writer.drain()
+        data = await reader.read(1024)
+        
         
     async def sync_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
