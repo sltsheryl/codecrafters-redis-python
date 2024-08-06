@@ -62,20 +62,36 @@ class RedisServer:
             self.parser.parse(data.decode())
         writer.close()
 
-    # use eventloop
+    # master handling replicas
     async def handle_client(self, reader, writer):
         while True:
             data = await reader.read(1024)
             if not data:
                 break
-            response = self.parser.parse(data.decode())
-            writer.write(response.encode())
-            await writer.drain()
-            # update replicas
-            if self.role == 'master':
-                for replica in self.replicas:
-                    replica.write(response.encode())
-                    await replica.drain()
+            command = data.decode().split("\r\n")
+            if len(command) < 3:
+                writer.write("-ERR invalid command\r\n".encode())
+                await writer.drain()
+                continue
+            if command[0] == "*3" and command[2].upper() == "REPLCONF":
+                if command[4].upper() == "LISTENING-PORT":
+                    self.port = int(command[6])
+                    writer.write("+OK\r\n".encode())
+                    await writer.drain()
+                    continue
+                elif command[4].upper() == "CAPA" and command[6].upper() == "PSYNC2":
+                    writer.write("+OK\r\n".encode())
+                    await writer.drain()
+                    continue
+            else:    
+                response = self.parser.parse(data.decode())
+                writer.write(response.encode())
+                await writer.drain()
+                # update replicas
+                if self.role == 'master':
+                    for replica in self.replicas:
+                        replica.write(response.encode())
+                        await replica.drain()
         writer.close()
 
     def get_info(self):
