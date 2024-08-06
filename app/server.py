@@ -10,7 +10,7 @@ class RedisServer:
         self.master_host = master_host
         self.master_port = master_port
         self.key_manager = KeyManager()
-        self.parser = RedisParser(self.key_manager)
+        self.parser = RedisParser(self.key_manager, self)
         self.replicas = []
 
         if self.role == 'replica' and self.master_host and self.master_port:
@@ -41,6 +41,15 @@ class RedisServer:
                     replica.write(response.encode())
                     await replica.drain()
         writer.close()
+
+    def get_info(self):
+        return {
+            'role': self.role,
+        }
+
+    def set_replica(self, master_host, master_port):
+        self.replicas.append((master_host, master_port))
+        return "+OK\r\n"
 
     async def start(self):
         server = await asyncio.start_server(self.handle_client, self.host, self.port)

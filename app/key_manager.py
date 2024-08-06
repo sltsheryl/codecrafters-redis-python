@@ -37,6 +37,4 @@ class KeyManager:
             else:
                 return "$-1\r\n"
     
-    def set_replica(self, master_host, master_port):
-        self.replicas.append((master_host, master_port))
-        return "+OK\r\n"
+    

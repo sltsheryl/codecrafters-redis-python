@@ -1,7 +1,8 @@
 
 class RedisParser:
-    def __init__(self, key_manager):
+    def __init__(self, key_manager, server):
         self.key_manager = key_manager
+        self.server = server
 
     def parse(self, command):
         # command input is in the form of $<length>\r\n<data>\r\n
@@ -43,6 +44,11 @@ class RedisParser:
                 return "-ERR invalid command\r\n"
             master_host = lines[4]
             master_port = int(lines[6])
-            return self.key_manager.set_replica(master_host, master_port)
+            return self.server.set_replica(master_host, master_port)
+        elif commandWord == "INFO":
+            info = self.server.get_info()
+            info_str = "\r\n".join([f"{key}:{value}" for key, value in info.items()])
+            return f"${len(info_str)}\r\n{info_str}\r\n"
+
         else:
             return "-ERR unknown command\r\n"
