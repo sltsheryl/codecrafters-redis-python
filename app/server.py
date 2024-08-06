@@ -12,6 +12,8 @@ class RedisServer:
         self.key_manager = KeyManager()
         self.parser = RedisParser(self.key_manager, self)
         self.replicas = []
+        self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+        self.offset = 0
 
         if self.role == 'replica' and self.master_host and self.master_port:
             asyncio.create_task(self.sync_with_master())
@@ -45,6 +47,8 @@ class RedisServer:
     def get_info(self):
         return {
             'role': self.role,
+            'master_replid': self.replication_id,
+            'master_repl_offset': self.offset,
         }
 
     def set_replica(self, master_host, master_port):
