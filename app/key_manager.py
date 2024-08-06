@@ -5,6 +5,7 @@ import threading
 class KeyManager:
     def __init__(self):
         self.key_store = {}
+        self.replicas = []
         self.lock = threading.Lock()
         self.cleanup_interval = 10
         self.cleanup()
@@ -35,4 +36,7 @@ class KeyManager:
                 return f"${len(value)}\r\n{value}\r\n"
             else:
                 return "$-1\r\n"
-
+    
+    def set_replica(self, master_host, master_port):
+        self.replicas.append((master_host, master_port))
+        return "+OK\r\n"

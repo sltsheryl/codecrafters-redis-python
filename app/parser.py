@@ -38,5 +38,11 @@ class RedisParser:
                 return "-ERR invalid command\r\n"
             key = lines[4]
             return self.key_manager.get_key(key)
+        elif commandWord == "REPLICAOF":
+            if len(lines) < 5:
+                return "-ERR invalid command\r\n"
+            master_host = lines[4]
+            master_port = int(lines[6])
+            return self.key_manager.set_replica(master_host, master_port)
         else:
             return "-ERR unknown command\r\n"
