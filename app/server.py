@@ -86,6 +86,15 @@ class RedisServer:
             elif command[0] == "*3" and command[2].upper() == "PSYNC":
                 # master cannot perform incremental replication with the replica, and will thus start a "full" resynchronization
                 writer.write(f"+FULLRESYNC {self.replication_id} 0\r\n".encode())
+                # send empty rdb file
+                # retrieved from https://github.com/codecrafters-io/redis-tester/blob/main/internal/assets/empty_rdb_hex.md
+                empty_rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2"
+                empty_rdb_bytes = bytes.fromhex(empty_rdb_hex)
+                # $<length_of_file>\r\n<contents_of_file>
+                writer.write(f"${len(empty_rdb_bytes)}\r\n".encode())
+                writer.write(empty_rdb_bytes)
+                await writer.drain()
+
             else:    
                 response = self.parser.parse(data.decode())
                 writer.write(response.encode())
