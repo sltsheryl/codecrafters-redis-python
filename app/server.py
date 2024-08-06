@@ -17,27 +17,34 @@ class RedisServer:
 
     async def start(self):
         if self.role == 'slave':
-            # ping master
-            await self.ping_master()
-            # sync with master
+            await self.handshake_with_master()
             asyncio.create_task(self.sync_with_master())
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
         async with server:
             await server.serve_forever()
         
-    
-    async def ping_master(self):
+    async def handshake_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
-        # PING command should be sent as a RESP Array
+        # ping 
         writer.write("*1\r\n$4\r\nPING\r\n".encode())
         await writer.drain()
         data = await reader.read(1024)
         if data.decode() != "+PONG\r\n":
             raise Exception("Failed to ping master")
-        writer.close()
-
+        # REPLCONF listening-port <PORT>
+        writer.write(f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode())
+        await writer.drain()
+        data = await reader.read(1024)
+        if data.decode() != "+OK\r\n":
+            raise Exception("Failed to send REPLCONF")
+        # REPLCONF capa psync2
+        writer.write("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".encode())
+        await writer.drain()
+        data = await reader.read(1024)
+        if data.decode() != "+OK\r\n":
+            raise Exception("Failed to send REPLCONF")
+        
     async def sync_with_master(self):
-        # replicate data from master
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
         while True:
             data = await reader.read(1024)
