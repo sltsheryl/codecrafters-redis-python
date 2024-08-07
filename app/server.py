@@ -3,7 +3,7 @@ from app.parser import RedisParser
 from app.key_manager import KeyManager
 
 class RedisServer:
-    def __init__(self, host = 'localhost', port = 6379, role='master', master_host=None, master_port=None):
+    def __init__(self, host='localhost', port=6379, role='master', master_host=None, master_port=None):
         self.host = host
         self.port = port
         self.role = role
@@ -12,6 +12,7 @@ class RedisServer:
         self.key_manager = KeyManager()
         self.parser = RedisParser(self.key_manager, self)
         self.replicas = []
+        self.replication_connections = [] 
         self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.offset = 0
 
@@ -22,7 +23,7 @@ class RedisServer:
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
         async with server:
             await server.serve_forever()
-        
+
     async def handshake_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
         # Step 1. Ping master 
@@ -51,8 +52,7 @@ class RedisServer:
         writer.write(f"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode())
         await writer.drain()
         data = await reader.read(1024)
-        
-        
+
     async def sync_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
         while True:
@@ -94,16 +94,18 @@ class RedisServer:
                 writer.write(f"${len(empty_rdb_bytes)}\r\n".encode())
                 writer.write(empty_rdb_bytes)
                 await writer.drain()
-
-            else:    
+                # add the writer to the replication connections
+                # so it's the same as the replica connections
+                self.replication_connections.append(writer)
+            else:
                 response = self.parser.parse(data.decode())
                 writer.write(response.encode())
                 await writer.drain()
-                # update replicas
-                if self.role == 'master':
-                    for replica in self.replicas:
-                        replica.write(response.encode())
-                        await replica.drain()
+                # update replicas for write commands
+                if self.role == 'master' and command[2].upper() in ["SET", "DEL"]:
+                    for replica_writer in self.replication_connections:
+                        replica_writer.write(data)
+                        await replica_writer.drain()
         writer.close()
 
     def get_info(self):
