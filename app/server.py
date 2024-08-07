@@ -2,8 +2,16 @@ import asyncio
 from app.parser import RedisParser
 from app.key_manager import KeyManager
 
+
 class RedisServer:
-    def __init__(self, host='localhost', port=6379, role='master', master_host=None, master_port=None):
+    def __init__(
+        self,
+        host="localhost",
+        port=6379,
+        role="master",
+        master_host=None,
+        master_port=None,
+    ):
         self.host = host
         self.port = port
         self.role = role
@@ -12,7 +20,7 @@ class RedisServer:
         self.key_manager = KeyManager()
         self.parser = RedisParser(self.key_manager, self)
         self.replicas = []
-        self.replication_connections = [] 
+        self.replication_connections = []
         self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.offset = 0
         self.master_reader = None
@@ -20,54 +28,64 @@ class RedisServer:
 
     async def start(self):
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
-        
-        if self.role == 'slave':
+
+        if self.role == "slave":
             await self.handshake_with_master()
-        
+
         async with server:
             await server.serve_forever()
 
     async def handshake_with_master(self):
-        self.master_reader, self.master_writer = await asyncio.open_connection(self.master_host, self.master_port)
+        self.master_reader, self.master_writer = await asyncio.open_connection(
+            self.master_host, self.master_port
+        )
         # STEP 1. Ping master
         self.master_writer.write("*1\r\n$4\r\nPING\r\n".encode())
         await self.master_writer.drain()
         data = await self.master_reader.read(1024)
         if data.decode() != "+PONG\r\n":
             raise Exception("Failed to ping master")
-        
+
         # STEP 2. Send config of slave
         # REPLCONF listening-port <PORT>
-        self.master_writer.write(f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode())
+        self.master_writer.write(
+            f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode()
+        )
         await self.master_writer.drain()
         data = await self.master_reader.read(1024)
         if data.decode() != "+OK\r\n":
             raise Exception("Failed to send REPLCONF")
         # REPLCONF capa psync2
-        self.master_writer.write("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".encode())
+        self.master_writer.write(
+            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".encode()
+        )
         await self.master_writer.drain()
         data = await self.master_reader.read(1024)
         if data.decode() != "+OK\r\n":
             raise Exception("Failed to send REPLCONF")
-        
+
         # STEP 3. Psync with master
         # PSYNC <REPLID> <OFFSET>
-        self.master_writer.write(f"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode())
+        self.master_writer.write(
+            "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode()
+        )
         await self.master_writer.drain()
 
-        response = await self.master_reader.readuntil(b'\r\n')
-        if not response.startswith(b'+FULLRESYNC'):
+        response = await self.master_reader.readuntil(b"\r\n")
+        if not response.startswith(b"+FULLRESYNC"):
             raise Exception("Failed to receive FULLRESYNC")
-        
-        rdb_size_bulk = await self.master_reader.readuntil(b'\r\n')
-        if not rdb_size_bulk.startswith(b'$'):
+
+        rdb_size_bulk = await self.master_reader.readuntil(b"\r\n")
+        if not rdb_size_bulk.startswith(b"$"):
             raise Exception(f"Expected bulk string for RDB size, got: {rdb_size_bulk}")
-        
-        rdb_size = int(rdb_size_bulk[1:-2])  # remove '$' and '\r\n', then convert to int
-        
+
+        rdb_size = int(
+            rdb_size_bulk[1:-2]
+        )  # remove '$' and '\r\n', then convert to int
+
         # actual RDB data
-        rdb_data = await self.master_reader.readexactly(rdb_size)
-        
+        rdb_data = await self.master_reader.readexactly(rdb_size)  # noqa: F841
+
         print(f"Received RDB file of size {rdb_size} bytes")
 
         asyncio.create_task(self.process_propagated_commands())
@@ -75,15 +93,15 @@ class RedisServer:
     async def process_propagated_commands(self):
         while True:
             try:
-                command = await self.master_reader.readuntil(b'\r\n')
-                if command.startswith(b'*'):  # RESP array
+                command = await self.master_reader.readuntil(b"\r\n")
+                if command.startswith(b"*"):  # RESP array
                     num_elements = int(command[1:])
                     full_command = [command]
                     for _ in range(2 * num_elements):
-                        element = await self.master_reader.readuntil(b'\r\n')
+                        element = await self.master_reader.readuntil(b"\r\n")
                         full_command.append(element)
-                    
-                    full_command_str = b''.join(full_command).decode()
+
+                    full_command_str = b"".join(full_command).decode()
                     # parse the command without responding (as master propagates to replicas)
                     self.parser.parse(full_command_str, respond=False)
                 else:
@@ -95,7 +113,9 @@ class RedisServer:
                 print(f"Error processing propagated command: {e}")
 
     async def sync_with_master(self):
-        reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
+        reader, writer = await asyncio.open_connection(
+            self.master_host, self.master_port
+        )
         while True:
             data = await reader.read(1024)
             if not data:
@@ -147,7 +167,7 @@ class RedisServer:
                 writer.write(response.encode())
                 await writer.drain()
                 # update replicas for write commands
-                if self.role == 'master' and command[2].upper() in ["SET", "DEL"]:
+                if self.role == "master" and command[2].upper() in ["SET", "DEL"]:
                     for replica_writer in self.replication_connections:
                         replica_writer.write(data)
                         await replica_writer.drain()
@@ -155,9 +175,9 @@ class RedisServer:
 
     def get_info(self):
         return {
-            'role': self.role,
-            'master_replid': self.replication_id,
-            'master_repl_offset': self.offset,
+            "role": self.role,
+            "master_replid": self.replication_id,
+            "master_repl_offset": self.offset,
         }
 
     def set_replica(self, master_host, master_port):

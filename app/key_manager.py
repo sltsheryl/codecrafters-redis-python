@@ -1,6 +1,7 @@
 import time
 import threading
 
+
 # threading used to ensure main is not blocked
 class KeyManager:
     def __init__(self):
@@ -13,7 +14,7 @@ class KeyManager:
     def set_key(self, key, value, expiry=None):
         with self.lock:
             if expiry:
-                expiry_time = time.time() + expiry/1000
+                expiry_time = time.time() + expiry / 1000
             else:
                 expiry_time = None
             self.key_store[key] = (value, expiry_time)
@@ -25,7 +26,7 @@ class KeyManager:
             for key, (value, expiry_time) in list(self.key_store.items()):
                 if expiry_time and expiry_time < time.time():
                     del self.key_store[key]
-    
+
     def get_key(self, key):
         with self.lock:
             if key in self.key_store:
@@ -36,5 +37,3 @@ class KeyManager:
                 return f"${len(value)}\r\n{value}\r\n"
             else:
                 return "$-1\r\n"
-    
-    
