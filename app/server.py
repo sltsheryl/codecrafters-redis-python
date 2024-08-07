@@ -15,43 +15,84 @@ class RedisServer:
         self.replication_connections = [] 
         self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.offset = 0
+        self.master_reader = None
+        self.master_writer = None
 
     async def start(self):
+        server = await asyncio.start_server(self.handle_client, self.host, self.port)
+        
         if self.role == 'slave':
             await self.handshake_with_master()
-            asyncio.create_task(self.sync_with_master())
-        server = await asyncio.start_server(self.handle_client, self.host, self.port)
+        
         async with server:
             await server.serve_forever()
 
     async def handshake_with_master(self):
-        reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
-        # Step 1. Ping master 
-        writer.write("*1\r\n$4\r\nPING\r\n".encode())
-        await writer.drain()
-        data = await reader.read(1024)
+        self.master_reader, self.master_writer = await asyncio.open_connection(self.master_host, self.master_port)
+        # STEP 1. Ping master
+        self.master_writer.write("*1\r\n$4\r\nPING\r\n".encode())
+        await self.master_writer.drain()
+        data = await self.master_reader.read(1024)
         if data.decode() != "+PONG\r\n":
             raise Exception("Failed to ping master")
         
-        # Step 2. Send config of slave
+        # STEP 2. Send config of slave
         # REPLCONF listening-port <PORT>
-        writer.write(f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode())
-        await writer.drain()
-        data = await reader.read(1024)
+        self.master_writer.write(f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${len(str(self.port))}\r\n{str(self.port)}\r\n".encode())
+        await self.master_writer.drain()
+        data = await self.master_reader.read(1024)
         if data.decode() != "+OK\r\n":
             raise Exception("Failed to send REPLCONF")
         # REPLCONF capa psync2
-        writer.write("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".encode())
-        await writer.drain()
-        data = await reader.read(1024)
+        self.master_writer.write("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n".encode())
+        await self.master_writer.drain()
+        data = await self.master_reader.read(1024)
         if data.decode() != "+OK\r\n":
             raise Exception("Failed to send REPLCONF")
         
-        # Step 3. Psync with master
+        # STEP 3. Psync with master
         # PSYNC <REPLID> <OFFSET>
-        writer.write(f"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode())
-        await writer.drain()
-        data = await reader.read(1024)
+        self.master_writer.write(f"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n".encode())
+        await self.master_writer.drain()
+
+        response = await self.master_reader.readuntil(b'\r\n')
+        if not response.startswith(b'+FULLRESYNC'):
+            raise Exception("Failed to receive FULLRESYNC")
+        
+        rdb_size_bulk = await self.master_reader.readuntil(b'\r\n')
+        if not rdb_size_bulk.startswith(b'$'):
+            raise Exception(f"Expected bulk string for RDB size, got: {rdb_size_bulk}")
+        
+        rdb_size = int(rdb_size_bulk[1:-2])  # remove '$' and '\r\n', then convert to int
+        
+        # actual RDB data
+        rdb_data = await self.master_reader.readexactly(rdb_size)
+        
+        print(f"Received RDB file of size {rdb_size} bytes")
+
+        asyncio.create_task(self.process_propagated_commands())
+
+    async def process_propagated_commands(self):
+        while True:
+            try:
+                command = await self.master_reader.readuntil(b'\r\n')
+                if command.startswith(b'*'):  # RESP array
+                    num_elements = int(command[1:])
+                    full_command = [command]
+                    for _ in range(2 * num_elements):
+                        element = await self.master_reader.readuntil(b'\r\n')
+                        full_command.append(element)
+                    
+                    full_command_str = b''.join(full_command).decode()
+                    # parse the command without responding (as master propagates to replicas)
+                    self.parser.parse(full_command_str, respond=False)
+                else:
+                    print(f"Unexpected data from master: {command}")
+            except asyncio.IncompleteReadError:
+                print("Connection to master closed")
+                break
+            except Exception as e:
+                print(f"Error processing propagated command: {e}")
 
     async def sync_with_master(self):
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
@@ -73,16 +114,19 @@ class RedisServer:
                 writer.write("-ERR invalid command\r\n".encode())
                 await writer.drain()
                 continue
+
             if command[0] == "*3" and command[2].upper() == "REPLCONF":
                 if command[4].upper() == "LISTENING-PORT":
                     self.port = int(command[6])
                     writer.write("+OK\r\n".encode())
                     await writer.drain()
                     continue
+
                 elif command[4].upper() == "CAPA" and command[6].upper() == "PSYNC2":
                     writer.write("+OK\r\n".encode())
                     await writer.drain()
                     continue
+
             elif command[0] == "*3" and command[2].upper() == "PSYNC":
                 # master cannot perform incremental replication with the replica, and will thus start a "full" resynchronization
                 writer.write(f"+FULLRESYNC {self.replication_id} 0\r\n".encode())
@@ -97,6 +141,7 @@ class RedisServer:
                 # add the writer to the replication connections
                 # so it's the same as the replica connections
                 self.replication_connections.append(writer)
+
             else:
                 response = self.parser.parse(data.decode())
                 writer.write(response.encode())
