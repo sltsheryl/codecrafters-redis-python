@@ -63,5 +63,14 @@ class RedisParser:
             info_str = "\r\n".join([f"{key}:{value}" for key, value in info.items()])
             return f"${len(info_str)}\r\n{info_str}\r\n"
 
+        elif commandWord == "REPLCONF":
+            if len(lines) < 5:
+                return "-ERR invalid command\r\n"
+            replConfigCommand = lines[4].upper()
+            if replConfigCommand == "GETACK":
+                return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"
+            else:
+                return "-ERR unknown REPLCONF command\r\n"
+
         else:
             return "-ERR unknown command\r\n"

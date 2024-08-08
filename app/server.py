@@ -102,8 +102,16 @@ class RedisServer:
                         full_command.append(element)
 
                     full_command_str = b"".join(full_command).decode()
-                    # parse the command without responding (as master propagates to replicas)
-                    self.parser.parse(full_command_str, respond=False)
+                    if full_command_str.startswith(
+                        "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"
+                    ):
+                        response = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"
+                        self.master_writer.write(response.encode())
+                        await self.master_writer.drain()
+
+                    else:
+                        # parse the command without responding (as master propagates to replicas)
+                        self.parser.parse(full_command_str, respond=False)
                 else:
                     print(f"Unexpected data from master: {command}")
             except asyncio.IncompleteReadError:
