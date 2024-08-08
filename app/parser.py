@@ -71,6 +71,9 @@ class RedisParser:
                 return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(self.server.offset))}\r\n{self.server.offset}\r\n"
             else:
                 return "-ERR unknown REPLCONF command\r\n"
+        
+        elif commandWord == "WAIT":
+            return ":0\r\n"
 
         else:
             return "-ERR unknown command\r\n"
