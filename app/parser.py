@@ -73,7 +73,7 @@ class RedisParser:
                 return "-ERR unknown REPLCONF command\r\n"
         
         elif commandWord == "WAIT":
-            return ":0\r\n"
+            return f":{len(self.server.replication_connections)}\r\n"
 
         else:
             return "-ERR unknown command\r\n"

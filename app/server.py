@@ -19,7 +19,9 @@ class RedisServer:
         self.master_port = master_port
         self.key_manager = KeyManager()
         self.parser = RedisParser(self.key_manager, self)
+        # stores the configuration details (host and port) of the replicas
         self.replicas = []
+        # stores the connections to the replicas
         self.replication_connections = []
         self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.offset = 0
