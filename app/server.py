@@ -105,13 +105,16 @@ class RedisServer:
                     if full_command_str.startswith(
                         "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"
                     ):
-                        response = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"
+                        response = f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(self.offset))}\r\n{self.offset}\r\n"
+
                         self.master_writer.write(response.encode())
                         await self.master_writer.drain()
+                        self.offset += len(full_command_str)
 
                     else:
                         # parse the command without responding (as master propagates to replicas)
                         self.parser.parse(full_command_str, respond=False)
+                        self.offset += len(full_command_str)
                 else:
                     print(f"Unexpected data from master: {command}")
             except asyncio.IncompleteReadError:
@@ -148,11 +151,13 @@ class RedisServer:
                     self.port = int(command[6])
                     writer.write("+OK\r\n".encode())
                     await writer.drain()
+                    self.offset += len(data)
                     continue
 
                 elif command[4].upper() == "CAPA" and command[6].upper() == "PSYNC2":
                     writer.write("+OK\r\n".encode())
                     await writer.drain()
+                    self.offset += len(data)
                     continue
 
             elif command[0] == "*3" and command[2].upper() == "PSYNC":
@@ -166,6 +171,7 @@ class RedisServer:
                 writer.write(f"${len(empty_rdb_bytes)}\r\n".encode())
                 writer.write(empty_rdb_bytes)
                 await writer.drain()
+                self.offset += len(data)
                 # add the writer to the replication connections
                 # so it's the same as the replica connections
                 self.replication_connections.append(writer)
@@ -174,6 +180,7 @@ class RedisServer:
                 response = self.parser.parse(data.decode())
                 writer.write(response.encode())
                 await writer.drain()
+                self.offset += len(data)
                 # update replicas for write commands
                 if self.role == "master" and command[2].upper() in ["SET", "DEL"]:
                     for replica_writer in self.replication_connections:

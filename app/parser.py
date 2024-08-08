@@ -68,7 +68,7 @@ class RedisParser:
                 return "-ERR invalid command\r\n"
             replConfigCommand = lines[4].upper()
             if replConfigCommand == "GETACK":
-                return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"
+                return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(self.server.offset))}\r\n{self.server.offset}\r\n"
             else:
                 return "-ERR unknown REPLCONF command\r\n"
 
